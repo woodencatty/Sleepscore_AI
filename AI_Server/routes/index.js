@@ -114,7 +114,7 @@ router.get('/ai/train/:user_id', function (req, res, next) {
     n_estimators: 10
   });
 
-
+var predicted_score;
   const train_test = () => {
     console.log("StartTrain");
 
@@ -123,6 +123,7 @@ router.get('/ai/train/:user_id', function (req, res, next) {
       //console.log(JSON.stringify(trees, null, 4));
       var pred = rf.predict(testdata, predictSleepScore);
       console.log(pred);
+      predicted_score = pred;
     });
   }
 
@@ -130,13 +131,15 @@ router.get('/ai/train/:user_id', function (req, res, next) {
     await main(User_Number);
     // await console.log(traindata);
     await train_test();
-    return "job done";
+    return "done";
   }
 
   all_to_do().then(function (result) {
     console.log(result);
-    res.render('index', {
-      title: 'Express'
+    res.render('SleepAI_Train', {
+      title: req.params.user_id,
+      SleepData : JSON.stringify(traindata),
+      SleepScore : predicted_score
     });
   })
 
