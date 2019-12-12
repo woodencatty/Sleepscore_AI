@@ -42,15 +42,17 @@ const fetchSleepData = async (userInfoId) => {
           FROM ${USER_ANALYZED_SLEEP_INFO_TABLE} A
           INNER JOIN ${SLEEP_INFO_TABLE} B
           ON A.${ANALYSIS_DATE_COLUMN} = B.${QUERY_DATE_COLUMN}
-          WHERE A.${USER_INFO_ID_COLUMN} = ? AND A.${ANALYSIS_DATE_COLUMN} limit 100`,
+          WHERE A.${USER_INFO_ID_COLUMN} = ? AND A.${ANALYSIS_DATE_COLUMN} limit 10000`,
       [userInfoId]
     )
     return selectionResult.map((eachEntry) => {
-      return { input : [parseFloat(eachEntry[TEMPERATURE_COLUMN]), parseFloat(eachEntry[HUMIDITY_COLUMN]), eachEntry[LIGHT_COLUMN],
-        eachEntry[SOUND_COLUMN], eachEntry[MOVEMENT_COUNT_COLUMN], eachEntry[SNORING_COUNT_COLUMN]], output : eachEntry[SLEEP_SCORE_COLUMN]
+      return {
+        input: {
+          temp: parseFloat(eachEntry[TEMPERATURE_COLUMN])/100, humi: parseFloat(eachEntry[HUMIDITY_COLUMN])/100, light: eachEntry[LIGHT_COLUMN]/100,
+          noise: eachEntry[SOUND_COLUMN]/10000, move: eachEntry[MOVEMENT_COUNT_COLUMN]/100, snore: eachEntry[SNORING_COUNT_COLUMN]/100
+        }, output: { Score: eachEntry[SLEEP_SCORE_COLUMN]/100 }
       }
     })
-
   } catch (anyKindOfAsyncProcessException) {
     console.error(anyKindOfAsyncProcessException)
     databaseConnection.rollback()
@@ -72,17 +74,16 @@ router.get('/', function (req, res, next) {
   });
 
 });
-  //----------------------------------------------------------------------------------------------------------------학습RESTAPI
+//----------------------------------------------------------------------------------------------------------------학습RESTAPI
 
 router.get('/ai/train/:user_id', function (req, res, next) {
   console.log("train user_id = " + req.params.user_id)
 
-  var Train_net = new brain.NeuralNetwork({
-    hiddenLayers: [5, 3],
-    activation: 'sigmoid'
-});
+  var Train_net = new brain.NeuralNetwork();
+  var traindata = [];
+  var User_Number = req.params.user_id; //유저번호
 
-  //----------------------------------------------------------------------------------------------------------------학습메인함수
+  //----------------------------------------------------------------------------------------------------------------학습데이터 추출함수
   const getSleepDB = async (userid) => {
     //Date1 ~ Date 2 Data
     let sleepData = await fetchSleepData(userid)
@@ -91,27 +92,17 @@ router.get('/ai/train/:user_id', function (req, res, next) {
     console.log("DB DONE");
   }
 
-  var traindata = [];
-  var User_Number = req.params.user_id; //유저번호
-
-  //----------------------------------------------------------------------------------------------------------------임시학습데이터
-
-  var Train_net = new brain.NeuralNetwork({
-    hiddenLayers: [5, 3],
-    activation: 'sigmoid'
-});
-
-  //----------------------------------------------------------------------------------------------------------------학습내용 + 예측
+  //----------------------------------------------------------------------------------------------------------------학습메인함수
   const trainSleepScore = async () => {
     console.log("StartTrain");
     await Train_net.train(traindata);
-        //----------------------------------------------------------------------------------------------------------------학습내용 저장
-     await fs.writeFile("trainfile/"+User_Number+".json", JSON.stringify(Train_net), function (err) {
-        if (err)
-            return console.log(err);
-        console.log("The train file was saved");
+    //----------------------------------------------------------------------------------------------------------------학습내용 저장
+    await fs.writeFile("trainfile/" + User_Number + ".json", JSON.stringify(Train_net), function (err) {
+      if (err)
+        return console.log(err);
+      console.log("The train file was saved");
     });
-    }
+  }
 
   const all_to_do = async () => {
     await getSleepDB(User_Number);
@@ -124,32 +115,35 @@ router.get('/ai/train/:user_id', function (req, res, next) {
     console.log(result);
     res.render('SleepAI_Train', {
       title: req.params.user_id,
-      SleepData : JSON.stringify(traindata),
+      SleepData: JSON.stringify(traindata),
     });
   })
 
 });
 
 
-  //----------------------------------------------------------------------------------------------------------------예측RESTAPI
+//----------------------------------------------------------------------------------------------------------------예측RESTAPI
 
 router.get('/ai/test/:user_id', function (req, res, next) {
 
   var Test_net = new brain.NeuralNetwork();
   var SleepSocreResult;
-
-  const readTrainedFile = () =>{
-  try {
-    var obj = JSON.parse(fs.readFileSync('network.json', 'utf8'));
-    Test_net.fromJSON(obj);
+  var User_Number = req.params.user_id;
+  var testData = {temp : req.headers.temp/100, humi : req.headers.humi/100, light : req.headers.light/100, noise : req.headers.noise/10000, move : req.headers.move/100, snore : req.headers.snore/100}
+  const readTrainedFile = () => {
+    try {
+      var obj = JSON.parse(fs.readFileSync("trainfile/" + User_Number + ".json", 'utf8'));
+      Test_net.fromJSON(obj);
     }
-     catch (error) {
-        console.log(error);
+    catch (error) {
+      console.log(error);
     }
   }
 
-  const getSleepScoreResult = ()=>{
-    SleepSocreResult = Test_net.run(["get에 담긴데이터"]);   // Data
+  const getSleepScoreResult = () => {
+    console.log("test user_id = " + User_Number);
+    console.log(testData);
+    SleepSocreResult = Test_net.run(testData);   // Data
   }
 
   const all_to_do = async () => {
@@ -162,16 +156,12 @@ router.get('/ai/test/:user_id', function (req, res, next) {
   all_to_do().then(function (result) {
     console.log(result);
     res.render('SleepAI_Test', {
-      title: req.params.user_id,
-      SleepData : "get에 담긴데이터",
-      SleepScore : SleepSocreResult,
+      title: User_Number,
+      SleepData: JSON.stringify(testData),
+      SleepScore: JSON.stringify(SleepSocreResult),
     });
   })
 
-  res.render('index', {
-    title: 'Express'
-  });
-  console.log("test user_id = " + req.params.user_id)
 });
 
 router.delete('/ai/manage/removeall', function (req, res, next) {

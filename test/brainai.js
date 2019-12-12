@@ -1,27 +1,26 @@
-const assert = require('assert');
-var brain = require('brain.js');
 
-const net = new brain.recurrent.LSTMTimeStep({
-  inputSize: 2,
-  hiddenLayers: [10],
-  outputSize: 2
+var brain = require('brain.js');
+const fs = require('fs');
+
+
+var net = new brain.NeuralNetwork();
+ 
+net.train([{input: { r: 1, g: 1, b: 1 }, output: { black: 0.10 }},
+           {input: { r: 0.16, g: 0.09, b: 0.2 }, output: { white: 0.90}},
+           {input: { r: 0.0, g: 0.0, b: 0.0 }, output: { black: 0.90 }}]);
+ 
+var output = net.run({ r: 1, g: 1, b: 1 });  // { white: 0.99, black: 0.002 }
+console.log(output);
+var output = net.run({ r: 0.2, g: 0.4, b: 0.6 });
+console.log(output);
+var output = net.run({ r: 0.5, g: 0.8, b: 0 });
+console.log(output);
+var output = net.run({ r: 1, g: 1, b: 1 });
+
+fs.writeFile("test.json", JSON.stringify(net), function (err) {
+  if (err)
+    return console.log(err);
+  console.log("The train file was saved");
 });
 
-//Same test as previous, but combined on a single set
-const trainingData = [
-  [[1,5],[2,4],[3,3],[4,2],[5,1]]
-];
-
-net.train(trainingData, { log: true, errorThresh: 0.09 });
-
-const closeToFiveAndOne = net.run([[1,5],[2,4],[3,3],[4,2]]);
-
-assert(Math.round(closeToFiveAndOne[0]) === 5, `${ closeToFiveAndOne[0] } does not round to 5`);
-assert(Math.round(closeToFiveAndOne[1]) === 1, `${ closeToFiveAndOne[1] } does not round to 1`);
-console.log(closeToFiveAndOne);
-
-// now we're cookin' with gas!
-const forecast = net.forecast([[1,5],[2,4]], 3);
-assert(Math.round(forecast[2][0]) === 5, `${ forecast[2][0] } does not round to 5`);
-assert(Math.round(forecast[2][1]) === 1, `${ forecast[2][1] } does not round to 1`);
-console.log('next 3 predictions', forecast);
+console.log(output);
