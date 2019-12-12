@@ -2,7 +2,8 @@ var express = require('express');
 var router = express.Router();
 
 //----------------------------------------------------------------------------------------------------------------값 정의
-var brain = require("brain.js");
+
+RandomForestClassifier = require('random-forest-classifier').RandomForestClassifier;
 const fs = require('fs');
 
 `use strict`
@@ -34,9 +35,12 @@ const SLEEP_SCORE_COLUMN = "sleepScore"
  */
 
 //----------------------------------------------------------------------------------------------------------------수면데이터 DB함수
-const fetchSleepData = async (userInfoId) => {
+const fetchSleepData = async (userInfoId, dateFrom, dateTo) => {
   const databaseConnection = await databasePool.getConnection(async conn => conn)
   try {
+    const ioStringToDateRegex = /T.+/
+    dateFrom = dateFrom instanceof Date ? dateFrom.toISOString().replace(ioStringToDateRegex, "") : (dateFrom ? dateFrom : "2019-01-01")
+    dateTo = dateTo instanceof Date ? dateTo.toISOString().replace(ioStringToDateRegex, "") : (dateTo ? dateTo : new Date().toISOString().replace(ioStringToDateRegex, ""))
     var [selectionResult] = await databaseConnection.query(
       `SELECT ${TEMPERATURE_COLUMN}, ${HUMIDITY_COLUMN}, ${LIGHT_COLUMN}, ${SOUND_COLUMN}, ${MOVEMENT_COUNT_COLUMN}, ${SNORING_COUNT_COLUMN}, ${SLEEP_SCORE_COLUMN}
           FROM ${USER_ANALYZED_SLEEP_INFO_TABLE} A
@@ -46,8 +50,14 @@ const fetchSleepData = async (userInfoId) => {
       [userInfoId]
     )
     return selectionResult.map((eachEntry) => {
-      return { input : [parseFloat(eachEntry[TEMPERATURE_COLUMN]), parseFloat(eachEntry[HUMIDITY_COLUMN]), eachEntry[LIGHT_COLUMN],
-        eachEntry[SOUND_COLUMN], eachEntry[MOVEMENT_COUNT_COLUMN], eachEntry[SNORING_COUNT_COLUMN]], output : eachEntry[SLEEP_SCORE_COLUMN]
+      return {
+        [TEMPERATURE_COLUMN]: parseFloat(eachEntry[TEMPERATURE_COLUMN]),
+        [HUMIDITY_COLUMN]: parseFloat(eachEntry[HUMIDITY_COLUMN]),
+        [LIGHT_COLUMN]: eachEntry[LIGHT_COLUMN],
+        [SOUND_COLUMN]: eachEntry[SOUND_COLUMN],
+        [MOVEMENT_COUNT_COLUMN]: eachEntry[MOVEMENT_COUNT_COLUMN],
+        [SNORING_COUNT_COLUMN]: eachEntry[SNORING_COUNT_COLUMN],
+        [SLEEP_SCORE_COLUMN]: eachEntry[SLEEP_SCORE_COLUMN]
       }
     })
 
@@ -55,6 +65,7 @@ const fetchSleepData = async (userInfoId) => {
     console.error(anyKindOfAsyncProcessException)
     databaseConnection.rollback()
     databaseConnection.release()
+    process.exit(1)
     return null
   } finally {
     databaseConnection.release()
@@ -77,15 +88,10 @@ router.get('/', function (req, res, next) {
 router.get('/ai/train/:user_id', function (req, res, next) {
   console.log("train user_id = " + req.params.user_id)
 
-  var Train_net = new brain.NeuralNetwork({
-    hiddenLayers: [5, 3],
-    activation: 'sigmoid'
-});
-
   //----------------------------------------------------------------------------------------------------------------학습메인함수
   const getSleepDB = async (userid) => {
     //Date1 ~ Date 2 Data
-    let sleepData = await fetchSleepData(userid)
+    let sleepData = await fetchSleepData(userid, '2019-10-01', '2019-10-31')
     traindata = sleepData;
     console.log(traindata);
     console.log("DB DONE");
@@ -95,28 +101,47 @@ router.get('/ai/train/:user_id', function (req, res, next) {
   var User_Number = req.params.user_id; //유저번호
 
   //----------------------------------------------------------------------------------------------------------------임시학습데이터
+  var testdata = [{
+    "temperature": 36,
+    "humidity": 34,
+    "light": 1686,
+    "sound": 0,
+    "movementCount": 1,
+    "snoringCount": 0
+  }];
 
-  var Train_net = new brain.NeuralNetwork({
-    hiddenLayers: [5, 3],
-    activation: 'sigmoid'
-});
+  var rf = new RandomForestClassifier({
+    n_estimators: 10
+  });
 
   //----------------------------------------------------------------------------------------------------------------학습내용 + 예측
-  const trainSleepScore = async () => {
+var predicted_score;
+var trained_json
+  const train_test = () => {
     console.log("StartTrain");
-    await Train_net.train(traindata);
+
+    rf.fit(traindata, ["temperature", "humidity", "light", "sound", "movementCount", "snoringCount"], "sleepScore", function (err, predictSleepScore) {
+      //    console.log(traindata);
+      //console.log(JSON.stringify(trees, null, 4));
+      var pred = rf.predict(testdata, predictSleepScore);
+      console.log(pred);
+      predicted_score = pred;
+      trained_json = JSON.stringify(rf)
         //----------------------------------------------------------------------------------------------------------------학습내용 저장
-     await fs.writeFile("trainfile/"+User_Number+".json", JSON.stringify(Train_net), function (err) {
+      fs.writeFile("trainfile/"+User_Number+".json", JSON.stringify(rf), function (err) {
         if (err)
             return console.log(err);
         console.log("The train file was saved");
     });
-    }
+
+
+    });
+  }
 
   const all_to_do = async () => {
     await getSleepDB(User_Number);
     // await console.log(traindata);
-    await trainSleepScore();
+    await train_test();
     return "done";
   }
 
@@ -125,6 +150,8 @@ router.get('/ai/train/:user_id', function (req, res, next) {
     res.render('SleepAI_Train', {
       title: req.params.user_id,
       SleepData : JSON.stringify(traindata),
+      SleepScore : predicted_score,
+      Trainfile : trained_json
     });
   })
 
@@ -135,36 +162,45 @@ router.get('/ai/train/:user_id', function (req, res, next) {
 
 router.get('/ai/test/:user_id', function (req, res, next) {
 
-  var Test_net = new brain.NeuralNetwork();
-  var SleepSocreResult;
+  var rf = new RandomForestClassifier({
+    n_estimators: 10
+  });
+  
+  const train_test = () => {
+    console.log("StartTrain");
 
-  const readTrainedFile = () =>{
-  try {
-    var obj = JSON.parse(fs.readFileSync('network.json', 'utf8'));
-    Test_net.fromJSON(obj);
-    }
-     catch (error) {
-        console.log(error);
-    }
+    rf.fit(traindata, ["temperature", "humidity", "light", "sound", "movementCount", "snoringCount"], "sleepScore", function (err, predictSleepScore) {
+
+      var pred = rf.predict(testdata, predictSleepScore);
+      console.log(pred);
+      predicted_score = pred;
+      trained_json = JSON.stringify(rf)
+        //----------------------------------------------------------------------------------------------------------------학습내용 저장
+      fs.writeFile("trainfile/"+User_Number+".json", JSON.stringify(rf), function (err) {
+        if (err)
+            return console.log(err);
+        console.log("The train file was saved");
+    });
+
+
+    });
   }
 
-  const getSleepScoreResult = ()=>{
-    SleepSocreResult = Test_net.run(["get에 담긴데이터"]);   // Data
-  }
 
   const all_to_do = async () => {
-    await readTrainedFile();
-    await getSleepScoreResult();
+    // await console.log(traindata);
+    await train_test();
     return "done";
   }
 
 
   all_to_do().then(function (result) {
     console.log(result);
-    res.render('SleepAI_Test', {
+    res.render('SleepAI_Train', {
       title: req.params.user_id,
-      SleepData : "get에 담긴데이터",
-      SleepScore : SleepSocreResult,
+      SleepData : JSON.stringify(traindata),
+      SleepScore : predicted_score,
+      Trainfile : trained_json
     });
   })
 
