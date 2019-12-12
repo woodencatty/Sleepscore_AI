@@ -165,16 +165,23 @@ router.get('/ai/test/:user_id', function (req, res, next) {
 });
 
 router.delete('/ai/manage/removeall', function (req, res, next) {
-  res.render('index', {
-    title: 'Express'
+
+  fs.unlink(`trainfile/*`,(err)=>{ 
+    res.render('index', {
+      title: 'Express'
+    });
   });
 
 });
 
 router.delete('/ai/manage/remove/:user_id', function (req, res, next) {
-  res.render('index', {
-    title: 'Express'
+ 
+  fs.unlink(`trainfile/`+  req.params.user_id + ".json",(err)=>{ 
+    res.render('index', {
+      title: 'Express'
+    });
   });
+
   console.log("remove user_id = " + req.params.user_id)
 });
 
