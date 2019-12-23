@@ -178,9 +178,21 @@ router.get('/ai/test/:user_id', function (req, res, next) {
 
   var SleepMoveResult;
   var SleepSnoreResult;
-
+var SleepMoveTestResult;
+var SleepSnoreTestResult
   var User_Number = req.params.user_id;
   var testData = {temp : req.headers.temp/100, humi : req.headers.humi/100, snore : req.headers.snore/100, move : req.headers.move/100}
+  var statfile;
+
+  const readTrainedFile = () => {
+    try {
+      statfile = JSON.parse(fs.readFileSync("statfile/" + User_Number + ".json", 'utf8'));
+    }
+    catch (error) {
+      console.log(error);
+    }
+  }
+
 
   const readTrainedFile_move = () => {
     try {
@@ -203,14 +215,33 @@ router.get('/ai/test/:user_id', function (req, res, next) {
   const getSleepMoveResult = () => {
     console.log("test user_id = " + User_Number);
     console.log(testData);
-    SleepMoveResult = Test_net_move.run(testData);   // Data
+    SleepMoveTestResult = Test_net_move.run(testData);   // Data
+    if(SleepMoveTestResult.move*100 < testData.move*100){
+      if(statfile.avg_temp < testData.temp*100){
+        SleepMoveResult = {result : "온도가 높아 뒤척임이 많음", Suggest : "온도를"+statfile.avg_temp+"이하로 낮출 것"} 
+      }else{
+        SleepMoveResult = {result : "온도가 높진 않지만 뒤척임이 많음", Suggest : "기타 수면요소 문제"} 
+      }
+    }else{
+      SleepMoveResult = {result : "문제 없음. 평균 뒤척임", Suggest : "현재상태 유지"} 
+    }
   }
   const getSleepSnoreResult = () => {
     console.log("test user_id = " + User_Number);
     console.log(testData);
-    SleepSnoreResult = Test_net_snore.run(testData);   // Data
+    SleepSnoreTestResult = Test_net_snore.run(testData);   // Data
+    if(SleepSnoreTestResult.snore*100 < testData.snore*100){
+      if(statfile.avg_humi > testData.humi*100){
+        SleepSnoreResult = {result : "습도가 낮아 코골이가 많음", Suggest : "습도를"+statfile.avg_humi+"이상으로 높일 것"} 
+      }else{
+        SleepSnoreResult = {result : "습도가 낮진 않지만 코골이가 많음", Suggest : "기타 수면요소 문제"} 
+      }
+    }else{
+      SleepSnoreResult = {result : "문제 없음. 평균 코골이", Suggest : "현재상태 유지"} 
+    }
   }
   const all_to_do = async () => {
+    await readTrainedFile();
     await readTrainedFile_move();
     await readTrainedFile_snore();
     await getSleepMoveResult();
@@ -222,6 +253,9 @@ router.get('/ai/test/:user_id', function (req, res, next) {
     res.render('SleepAI_Test', {
       title: User_Number,
       SleepData: JSON.stringify(testData),
+      SleepStat : JSON.stringify(statfile),
+      SleepPredMove : JSON.stringify(SleepMoveTestResult.move*100),
+      SleepPredSnore : JSON.stringify(SleepSnoreTestResult.snore*100),
       SleepMove: JSON.stringify(SleepMoveResult),
       SleepSnore: JSON.stringify(SleepSnoreResult),
     });
@@ -370,6 +404,8 @@ router.get('/stat/test/:user_id', function (req, res, next) {
       title: User_Number,
       SleepData: JSON.stringify(testData),
       SleepStat : JSON.stringify(trainfile),
+      SleepPredMove : JSON.stringify(trainfile.avg_move),
+      SleepPredSnore : JSON.stringify(trainfile.avg_snore),
       SleepMove: JSON.stringify(SleepMoveResult),
       SleepSnore: JSON.stringify(SleepSnoreResult),
     });
