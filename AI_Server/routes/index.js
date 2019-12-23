@@ -180,7 +180,7 @@ router.get('/ai/test/:user_id', function (req, res, next) {
   var SleepSnoreResult;
 
   var User_Number = req.params.user_id;
-  var testData = {temp : req.headers.temp/100, humi : req.headers.humi/100}
+  var testData = {temp : req.headers.temp/100, humi : req.headers.humi/100, snore : req.headers.snore/100, move : req.headers.move/100}
 
   const readTrainedFile_move = () => {
     try {
@@ -256,11 +256,12 @@ router.get('/stat/train/:user_id', function (req, res, next) {
     }
 
   //----------------------------------------------------------------------------------------------------------------학습메인함수
-  const trainSleepMove = async () => {
+  const trainSleep = async () => {
     var total_temp = 0.0;
     var total_humi = 0.0;
     var total_move = 0.0;
-    var avg_temp, avg_humi, avg_move;
+    var total_snore = 0.0;
+    var avg_temp, avg_humi, avg_move,avg_snore;
     var count = 0;
 
   await traindata_move.forEach((item, index, array)=> {
@@ -269,57 +270,33 @@ router.get('/stat/train/:user_id', function (req, res, next) {
       total_move += item.output.move;
       count ++;
   });
+
+  await traindata_snore.forEach((item, index, array)=> {
+    total_snore += item.output.snore;
+});
+
     avg_temp = total_temp / count;
     avg_humi = total_humi / count;
     avg_move = total_move / count;
+    avg_snore = total_snore / count;
+
     console.log(avg_move);
+    console.log(avg_snore);
 
     //----------------------------------------------------------------------------------------------------------------학습내용 저장
-    await fs.writeFile("statfile/" + User_Number + "_move.json",'{"avg_temp" :'+ avg_temp+', "avg_humi" :'+  avg_humi+', "avg_move" : '+avg_move+'}', function (err) {
+    await fs.writeFile("statfile/" + User_Number + ".json",'{"avg_temp" :'+ parseInt(avg_temp*100)+', "avg_humi" :'+  parseInt(avg_humi*100)+', "avg_move" : '+avg_move*100+', "avg_snore" : '+avg_snore*100+'}', function (err) {
       if (err)
         return console.log(err);
       console.log("The train file was saved");
     });
   }
 
-    //----------------------------------------------------------------------------------------------------------------학습메인함수
-    const trainSleepSnore = async () => {
-      var total_temp = 0.0;
-      var total_humi = 0.0;
-      var total_snore = 0.0;
-      var avg_temp, avg_humi, avg_snore;
-      var count = 0;
-  
-    traindata_snore.forEach((item, index, array)=> {
-        total_temp += item.input.temp;
-        total_humi += item.input.humi;
-        total_snore += item.output.snore;
-        count ++;
-        console.log(total_temp);
-
-    });
-  
-    avg_temp = total_temp / count;
-    avg_humi = total_humi / count;
-    avg_snore = total_snore / count;
-    console.log(avg_snore);
-
-      //----------------------------------------------------------------------------------------------------------------학습내용 저장
-      await fs.writeFile("statfile/" + User_Number + "_snore.json",'{"avg_temp" :'+ avg_temp+', "avg_humi" :'+  avg_humi+', "avg_snore" : '+avg_snore+'}', function (err) {
-        if (err)
-          return console.log(err);
-        console.log("The train file was saved");
-      });
-    }
-  
 
   const all_to_do = async () => {
     await getSleepDB_move(User_Number);
     await getSleepDB_snore(User_Number);
 
-    await trainSleepMove();
-    await trainSleepSnore();
-
+    await trainSleep();
     return "done";
   }
 
@@ -337,30 +314,16 @@ router.get('/stat/train/:user_id', function (req, res, next) {
 
 //----------------------------------------------------------------------------------------------------------------기계식예측RESTAPI
 router.get('/stat/test/:user_id', function (req, res, next) {
-
-  var Test_net_move = new brain.NeuralNetwork();
-  var Test_net_snore = new brain.NeuralNetwork();
-
+  
   var SleepMoveResult;
   var SleepSnoreResult;
-
+  var trainfile
   var User_Number = req.params.user_id;
-  var testData = {temp : req.headers.temp/100, humi : req.headers.humi/100}
+  var testData = {temp : req.headers.temp, humi : req.headers.humi, snore : req.headers.snore, move : req.headers.move}
 
-  const readTrainedFile_move = () => {
+  const readTrainedFile = () => {
     try {
-      var obj = JSON.parse(fs.readFileSync("trainfile/" + User_Number + "_move.json", 'utf8'));
-      Test_net_move.fromJSON(obj);
-    }
-    catch (error) {
-      console.log(error);
-    }
-  }
-
-  const readTrainedFile_snore = () => {
-    try {
-      var obj = JSON.parse(fs.readFileSync("trainfile/" + User_Number + "_snore.json", 'utf8'));
-      Test_net_snore.fromJSON(obj);
+    trainfile = JSON.parse(fs.readFileSync("statfile/" + User_Number + ".json", 'utf8'));
     }
     catch (error) {
       console.log(error);
@@ -368,20 +331,31 @@ router.get('/stat/test/:user_id', function (req, res, next) {
   }
 
   const getSleepMoveResult = () => {
-    console.log("test user_id = " + User_Number);
-    console.log(testData);
-    SleepMoveResult = Test_net_move.run(testData);   // Data
+    if(trainfile.avg_move < testData.move){
+      if(trainfile.avg_temp < testData.temp){
+        SleepMoveResult = {result : "온도가 높아 뒤척임이 많음", Suggest : "온도를"+trainfile.avg_temp+"이하로 낮출 것"} 
+      }else{
+        SleepMoveResult = {result : "온도가 높진 않지만 뒤척임이 많음", Suggest : "기타 수면요소 문제"} 
+      }
+    }else{
+      SleepMoveResult = {result : "문제 없음. 평균 뒤척임", Suggest : "현재상태 유지"} 
+    }
   }
 
   const getSleepSnoreResult = () => {
-    console.log("test user_id = " + User_Number);
-    console.log(testData);
-    SleepSnoreResult = Test_net_snore.run(testData);   // Data
+    if(trainfile.avg_snore < testData.snore){
+      if(trainfile.avg_humi > testData.humi){
+        SleepSnoreResult = {result : "습도가 낮아 코골이가 많음", Suggest : "습도를"+trainfile.avg_humi+"이상으로 높일 것"} 
+      }else{
+        SleepSnoreResult = {result : "습도가 낮진 않지만 코골이가 많음", Suggest : "기타 수면요소 문제"} 
+      }
+    }else{
+      SleepSnoreResult = {result : "문제 없음. 평균 코골이", Suggest : "현재상태 유지"} 
+    }
   }
 
   const all_to_do = async () => {
-    await readTrainedFile_move();
-    await readTrainedFile_snore();
+    await readTrainedFile();
 
     await getSleepMoveResult();
     await getSleepSnoreResult();
@@ -395,6 +369,7 @@ router.get('/stat/test/:user_id', function (req, res, next) {
     res.render('SleepAI_Test', {
       title: User_Number,
       SleepData: JSON.stringify(testData),
+      SleepStat : JSON.stringify(trainfile),
       SleepMove: JSON.stringify(SleepMoveResult),
       SleepSnore: JSON.stringify(SleepSnoreResult),
     });
